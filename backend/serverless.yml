@@ -1,0 +1,125 @@
+service: chatapp
+app: chatapp
+provider:
+  name: aws
+  runtime: nodejs12.x
+  iam:
+    role: DefaultRole
+  region: ap-northeast-2
+  versionFunctions: false
+  stackName: serverless-chat-backend
+  timeout: 10
+  environment:
+    api_gateway_id:
+      Ref: ApiGatewayRestApi
+    socket_api_gateway_id:
+      Ref: WebsocketsApi
+resources:
+  Resources:
+    #람다를 위한 Role
+    DefaultRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+              Action: sts:AssumeRole
+        ManagedPolicyArns:
+          - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+        Policies:
+          - PolicyName: myPolicyName
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - logs:*
+                    - execute-api:*
+                  Resource: '*'
+    #DynamoDB 테이블, 채팅메세지
+    messageTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: chatapp-chat-messages
+        AttributeDefinitions:
+          - AttributeName: room_id 
+            AttributeType: S
+          - AttributeName: timestamp
+            AttributeType: N
+        KeySchema:
+          - AttributeName: room_id
+            KeyType: HASH
+          - AttributeName: timestamp
+            KeyType: RANGE
+        BillingMode: PAY_PER_REQUEST
+
+    userListTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: chatapp-userlist
+        AttributeDefinitions:
+          - AttributeName: connection_id 
+            AttributeType: S
+          - AttributeName: room_id
+            AttributeType: S
+          - AttributeName: user_id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: connection_id
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+        GlobalSecondaryIndexes:
+          - IndexName: room_id-user_id-index
+            KeySchema:
+              - AttributeName: room_id
+                KeyType: HASH
+              - AttributeName: user_id
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+
+
+plugins:
+  - serverless-deployment-bucket
+  - serverless-plugin-split-stacks
+custom:
+  splitStacks:
+    nestedStackCount: 5
+    perFunction: false
+    perType: false
+    perGroupFunction: true
+
+    #람다 함수들
+functions:
+  chat_onConnect:
+    name: 'chat_onConnect'
+    handler: src/lambda/chat/onConnect.handler
+    events:
+      - websocket:
+          route: $connect
+  chat_put:
+    name: 'chat_put'
+    handler: src/lambda/chat/put.handler
+    events:
+      - http:
+          path: chat
+          method: put
+          cors: true
+  chat_onDisconnect:
+    name: 'chat_onDisconnect'
+    handler: src/lambda/chat/onDisconnect.handler
+    events:
+      - websocket:
+          route: $disconnect
+  chat_get:
+    name: 'chat_get'
+    handler: src/lambda/chat/get.handler
+    events:
+      - http:
+          path: chat
+          method: get
+          cors: true
